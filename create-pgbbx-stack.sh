@@ -1,6 +1,6 @@
 #!/bin/bash
 
-cd helm-with-dependencies/
+cd /home/ubuntu/helm-with-dependencies/
 
 helm repo update
 
