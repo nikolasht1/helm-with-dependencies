@@ -1,81 +1,89 @@
-# kube-prometheus-values.yaml
+# ================= Grafana
+
 grafana:
-  enabled: true
-  
-  # Set custom login credentials
+  fullnameOverride: grafana
   adminUser: ""
   adminPassword: ""
 
-  # Automatically import dashboard 13659
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          uid: prometheus
+          type: prometheus
+          access: proxy
+          url: http://prometheus-server
+          isDefault: true 
+
   dashboardProviders:
     dashboardproviders.yaml:
       apiVersion: 1
       providers:
-        - name: 'default'
+        - name: default
           orgId: 1
-          folder: ''
+          folder: ""
           type: file
           disableDeletion: false
           editable: true
           options:
             path: /var/lib/grafana/dashboards/default
 
-  dashboards:
-    default:
-      blackbox-exporter-http-prober:
-        gnetId: ""
-        revision: 1
-        datasource: Prometheus
+  # Dashboard 13659 "Blackbox Exporter (HTTP prober)", bundled in dashboards/
+  dashboardsConfigMaps:
+    default: blackbox-dashboard
+
+  grafana.ini:
+    dashboards:
+      default_home_dashboard_path: /var/lib/grafana/dashboards/default/blackbox-exporter.json  
+
+  service:
+    type: ClusterIP
+    port: 80 
+
+# ================ Prometheus         
 
 prometheus:
-  prometheusSpec:
-    # Explicitly ensure Prometheus scans for Probe resources across namespaces
-    probeSelectorNilUsesHelmValues: false
-    probeSelector:
-      matchLabels:
-        release: kube-prometheus-stack
+  fullnameOverride: prometheus
+  alertmanager:
+    enabled: false
+  kube-state-metrics:
+    enabled: false
+  prometheus-node-exporter:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+  server:
+    fullnameOverride: prometheus-server
+    global:
+      scrape_interval: 30s
+  extraScrapeConfigs: |
+    - job_name: blackbox-http
+      metrics_path: /probe
+      params:
+        module: [http_2xx]
+      static_configs:
+        - targets:
+            - https://sh.infinityfree.io
+            - https://google.com
+      relabel_configs:
+        - source_labels: [__address__]
+          target_label: __param_target
+        - source_labels: [__param_target]
+          target_label: instance
+        - target_label: __address__
+          replacement: blackbox-exporter:9115
 
-# Create the specific target probe directly within the chart deployment
-additionalPrometheusRulesMap: {}
+# ======================= BlackBox
 
-#Google probe.
-apiVersion: monitoring.coreos.com/v1
-kind: Probe
-metadata:
-  name: google-blackbox-probe
-  namespace: monitoring
-  labels:
-    # Ensure this matches the release label your Prometheus uses to discover Probes
-    release: kube-prometheus-stack 
-spec:
-  # The module configured in your Blackbox Exporter values
-  module: http_2xx 
-  
-  # Configuration pointing Prometheus to your Blackbox Exporter service
-  prober:
-    url: k-prom-black-prometheus-blackbox-exporter:9115
-    path: /probe
-    
-  # The actual endpoint(s) you want to probe
-  targets:
-    staticConfig:
-      static:
-        - https://google.com
-      labels:
-        instance: google.com
-
-# blackbox-values.yaml
-secretConfig: false
-
-config:
-  modules:
-    http_2xx:
-      prober: http
-      timeout: 5s
-      http:
-        valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
-        valid_status_codes: []  # Defaults to 2xx
-        method: GET
-        follow_redirects: true
-        fail_if_ssl: false
-        fail_if_not_ssl: false
+prometheus-blackbox-exporter:
+  fullnameOverride: blackbox-exporter
+  config:
+    modules:
+      http_2xx:
+        prober: http
+        timeout: 10s
+        http:
+          valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+          follow_redirects: true
+          preferred_ip_protocol: ip4
